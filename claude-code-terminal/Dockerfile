@@ -5,13 +5,12 @@ ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     TERM=xterm-256color
 
-# Install system dependencies (Debian)
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     curl \
     git \
     jq \
-    openssh-client \
     tmux \
     coreutils \
     findutils \
@@ -20,6 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     openssl \
     ripgrep \
+    openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 20 LTS
@@ -40,6 +40,17 @@ RUN case "${BUILD_ARCH}" in \
 # Install Claude Code CLI
 RUN npm install -g @anthropic-ai/claude-code
 
+# Build HA MCP server
+COPY ha-mcp-server /opt/ha-mcp-server
+RUN cd /opt/ha-mcp-server && npm install && npm run build && npm prune --production && npm cache clean --force
+
+# Copy scripts
+COPY scripts /opt/scripts
+RUN chmod +x /opt/scripts/*.sh
+
+# Copy CLAUDE.md template
+COPY CLAUDE.md /opt/CLAUDE.md
+
 # Configure tmux
 RUN echo 'set-option -g history-limit 50000' > /root/.tmux.conf && \
     echo 'set-option -g mouse on' >> /root/.tmux.conf && \
@@ -52,11 +63,5 @@ RUN echo 'set-option -g history-limit 50000' > /root/.tmux.conf && \
     echo 'set-option -g allow-rename off' >> /root/.tmux.conf && \
     echo 'set-option -sg escape-time 10' >> /root/.tmux.conf
 
-# Configure bash aliases
-RUN echo 'export TERM=xterm-256color' >> /root/.bashrc && \
-    echo 'export LANG=C.UTF-8' >> /root/.bashrc && \
-    echo 'alias c="claude"' >> /root/.bashrc && \
-    echo 'alias cc="claude --continue"' >> /root/.bashrc
-
-# Copy rootfs overlay (run script, etc.)
+# Copy rootfs overlay (run script)
 COPY rootfs /

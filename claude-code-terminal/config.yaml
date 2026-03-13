@@ -1,9 +1,9 @@
 ---
 name: "Claude Code Terminal"
-version: "1.1.3"
+version: "2.0.0"
 slug: claude_code_terminal
-description: "Claude Code with persistent tmux sessions - never lose your context"
-url: "https://github.com/RobFahndrich/claude-code-haos-addon"
+description: "Claude Code with HA MCP tools, auto-discovery, and persistent sessions"
+url: "https://github.com/RTBRussell/ha-addons"
 startup: services
 boot: auto
 init: false
@@ -28,11 +28,9 @@ options:
   anthropic_api_key: ""
   model: "sonnet"
   yolo_mode: false
-  tmux_history_limit: 50000
   session_name: "claude"
 schema:
   anthropic_api_key: "password"
   model: "list(sonnet|opus|haiku)"
   yolo_mode: "bool"
-  tmux_history_limit: "int"
   session_name: "str"

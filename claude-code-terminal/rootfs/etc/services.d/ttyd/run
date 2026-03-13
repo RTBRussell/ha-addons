@@ -6,8 +6,8 @@ bashio::log.info "=== Claude Code Terminal starting ==="
 # -------------------------------------------------------
 # Persistent storage setup
 # -------------------------------------------------------
-PERSIST_DIR=/data/claude-persist
-mkdir -p "${PERSIST_DIR}/config" "${PERSIST_DIR}/cache" /data/projects
+PERSIST_DIR=/data/home/.claude
+mkdir -p "${PERSIST_DIR}" /data/home/.config/claude-code /data/projects
 
 # -------------------------------------------------------
 # Import credentials from shared config if available
@@ -21,22 +21,21 @@ if [ -f /homeassistant/.claude-creds-transfer.json ]; then
 fi
 
 # -------------------------------------------------------
-# Read add-on options via bashio
+# Read add-on options
 # -------------------------------------------------------
 API_KEY=$(bashio::config 'anthropic_api_key' '')
 MODEL=$(bashio::config 'model' 'sonnet')
 YOLO_MODE=$(bashio::config 'yolo_mode' 'false')
-TMUX_HISTORY=$(bashio::config 'tmux_history_limit' '50000')
 SESSION_NAME=$(bashio::config 'session_name' 'claude')
 
 # -------------------------------------------------------
-# API key
+# API key (if provided, overrides OAuth credentials)
 # -------------------------------------------------------
 if bashio::var.has_value "${API_KEY}"; then
     export ANTHROPIC_API_KEY="${API_KEY}"
     bashio::log.info "Anthropic API key configured"
 else
-    bashio::log.warning "No Anthropic API key set - Claude will prompt for auth"
+    bashio::log.info "No API key set - using OAuth credentials"
 fi
 
 # -------------------------------------------------------
@@ -49,33 +48,28 @@ fi
 mkdir -p /root/.config
 if [ ! -L /root/.config/claude-code ]; then
     rm -rf /root/.config/claude-code
-    ln -s "${PERSIST_DIR}/config" /root/.config/claude-code
+    ln -s /data/home/.config/claude-code /root/.config/claude-code
 fi
-
-# -------------------------------------------------------
-# Update tmux scrollback from options
-# -------------------------------------------------------
-sed -i "s/history-limit.*/history-limit ${TMUX_HISTORY}/" /root/.tmux.conf
 
 # -------------------------------------------------------
 # YOLO mode
 # -------------------------------------------------------
 if bashio::var.true "${YOLO_MODE}"; then
-    bashio::log.info "YOLO mode enabled"
+    bashio::log.info "YOLO mode enabled - all permissions auto-approved"
     echo '{"permissions":{"allow":["Bash(*)","Read(*)","Write(*)","Edit(*)","Glob(*)","Grep(*)"],"deny":[]}}' \
         > "${PERSIST_DIR}/settings.json"
 fi
 
 # -------------------------------------------------------
-# Write environment file for tmux sessions to source
+# Environment file for bash sessions
 # -------------------------------------------------------
-ENV_FILE=/data/claude-env.sh
+ENV_FILE=/data/env.sh
 cat > "${ENV_FILE}" <<ENVEOF
 export TERM=xterm-256color
 export LANG=C.UTF-8
 export SHELL=/bin/bash
+export HOME=/root
 export CLAUDE_MODEL="${MODEL}"
-export SESSION_NAME="${SESSION_NAME}"
 export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/root/.npm-global/bin:\${PATH}"
 ENVEOF
 
@@ -88,64 +82,65 @@ if [ -n "${SUPERVISOR_TOKEN:-}" ]; then
 fi
 
 # -------------------------------------------------------
-# Set default shell for tmux
+# Register HA MCP server with Claude Code
+# -------------------------------------------------------
+if bashio::var.has_value "${SUPERVISOR_TOKEN:-}"; then
+    bashio::log.info "Configuring HA MCP server..."
+    export SUPERVISOR_TOKEN="${SUPERVISOR_TOKEN}"
+    claude mcp remove homeassistant -s user 2>/dev/null || true
+    claude mcp add homeassistant -s user \
+        -- node /opt/ha-mcp-server/build/index.js 2>/dev/null \
+        && bashio::log.info "HA MCP server registered (13 tools)" \
+        || bashio::log.warning "HA MCP registration failed (non-fatal)"
+fi
+
+# -------------------------------------------------------
+# Run auto-discovery
+# -------------------------------------------------------
+if [ -n "${SUPERVISOR_TOKEN:-}" ]; then
+    bashio::log.info "Running HA auto-discovery..."
+    /opt/scripts/ha-discovery.sh 2>/dev/null \
+        && bashio::log.info "HA context written to /homeassistant/.claude/ha_context.md" \
+        || bashio::log.warning "Auto-discovery failed (non-fatal)"
+fi
+
+# -------------------------------------------------------
+# Deploy CLAUDE.md to projects dir if not present
+# -------------------------------------------------------
+if [ ! -f /data/projects/CLAUDE.md ]; then
+    cp /opt/CLAUDE.md /data/projects/CLAUDE.md
+    bashio::log.info "Deployed CLAUDE.md template"
+fi
+
+# -------------------------------------------------------
+# Shell configuration
 # -------------------------------------------------------
 export SHELL=/bin/bash
 echo "set-option -g default-shell /bin/bash" >> /root/.tmux.conf
 echo "set-option -g default-command /bin/bash" >> /root/.tmux.conf
 
-# -------------------------------------------------------
-# Home Assistant MCP server
-# -------------------------------------------------------
-if bashio::var.has_value "${SUPERVISOR_TOKEN:-}"; then
-    bashio::log.info "Configuring Home Assistant MCP server..."
-    claude mcp remove homeassistant -s user 2>/dev/null || true
-    claude mcp add-json homeassistant \
-        "{\"type\":\"http\",\"url\":\"http://supervisor/core/api/mcp\",\"headers\":{\"Authorization\":\"Bearer ${SUPERVISOR_TOKEN}\"}}" \
-        -s user 2>/dev/null \
-        && bashio::log.info "HA MCP configured" \
-        || bashio::log.warning "HA MCP configuration failed (non-fatal)"
-fi
-
-# -------------------------------------------------------
-# Create a bashrc that sources the env file
-# -------------------------------------------------------
 cat > /root/.bashrc <<'RCEOF'
-[ -f /data/claude-env.sh ] && source /data/claude-env.sh
+[ -f /data/env.sh ] && source /data/env.sh
 alias c="claude"
 alias cc="claude --continue"
+alias cr="claude --resume"
+
+# Welcome message
+echo ""
+echo "  Claude Code Terminal for Home Assistant"
+echo "  ─────────────────────────────────────────"
+echo "  Commands:  c (claude)  |  cc (continue)  |  cr (resume)"
+echo "  Docs:      /homeassistant/.claude/"
+echo "  Projects:  /data/projects/"
+echo ""
 RCEOF
 
 # -------------------------------------------------------
-# Create startup script that launches Claude in tmux
-# -------------------------------------------------------
-CLAUDE_ARGS=""
-if [ "${MODEL}" != "default" ] && [ -n "${MODEL}" ]; then
-    CLAUDE_ARGS="--model ${MODEL}"
-fi
-
-cat > /data/claude-start.sh <<STARTEOF
-#!/bin/bash
-source /data/claude-env.sh
-cd /data/projects 2>/dev/null || cd /root
-echo ""
-echo "  Claude Code Terminal for Home Assistant"
-echo "  Session: ${SESSION_NAME} | Model: ${MODEL}"
-echo "  Close this tab anytime - your session persists!"
-echo ""
-exec claude ${CLAUDE_ARGS}
-STARTEOF
-chmod +x /data/claude-start.sh
-
-# -------------------------------------------------------
-# Get the dynamic ingress port from the Supervisor
+# Launch ttyd → tmux → bash
 # -------------------------------------------------------
 ingress_port=$(bashio::addon.ingress_port)
 bashio::log.info "Starting ttyd on ingress port ${ingress_port}"
 
-# -------------------------------------------------------
-# Launch ttyd bound to the ingress port, wrapping tmux
-# -------------------------------------------------------
 cd /data/projects || cd /root
 
 exec ttyd \
@@ -154,4 +149,4 @@ exec ttyd \
     -W \
     -t fontSize=14 \
     -t fontFamily="Monaco,Consolas,monospace" \
-    /bin/bash -c "exec tmux new-session -A -s ${SESSION_NAME} /data/claude-start.sh"
+    /bin/bash -c "exec tmux new-session -A -s ${SESSION_NAME}"
