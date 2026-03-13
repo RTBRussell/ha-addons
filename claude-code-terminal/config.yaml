@@ -1,6 +1,6 @@
 ---
 name: "Claude Code Terminal"
-version: "2.0.0"
+version: "2.0.1"
 slug: claude_code_terminal
 description: "Claude Code with HA MCP tools, auto-discovery, and persistent sessions"
 url: "https://github.com/RTBRussell/ha-addons"

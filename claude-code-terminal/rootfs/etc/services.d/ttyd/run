@@ -95,6 +95,17 @@ if bashio::var.has_value "${SUPERVISOR_TOKEN:-}"; then
 fi
 
 # -------------------------------------------------------
+# Set onboarding complete flag (prevents first-run wizard)
+# Must run AFTER mcp config since claude mcp add writes to .claude.json
+# -------------------------------------------------------
+if [ -f /root/.claude.json ]; then
+    TMP=$(jq '. + {"hasCompletedOnboarding":true}' /root/.claude.json 2>/dev/null) && echo "${TMP}" > /root/.claude.json
+else
+    echo '{"hasCompletedOnboarding":true}' > /root/.claude.json
+fi
+bashio::log.info "Onboarding flag set"
+
+# -------------------------------------------------------
 # Run auto-discovery
 # -------------------------------------------------------
 if [ -n "${SUPERVISOR_TOKEN:-}" ]; then
