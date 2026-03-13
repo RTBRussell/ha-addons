@@ -1,0 +1,6 @@
+#!/usr/bin/with-contenv bashio
+# shellcheck shell=bash
+
+# If ttyd crashes, wait before s6 restarts it
+bashio::log.warning "ttyd exited with code ${1:-unknown}, restarting in 5s..."
+sleep 5
